@@ -1,0 +1,55 @@
+---
+#Builds container Runtime for Federated Learning Stack
+- name: Build Runtime Environemnt
+  hosts: localhost
+  connection: local
+  any_errors_fatal: true
+  roles:
+    - ansible/roles/build_runtime_environment
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    rebuild_model: false
+    rebuild_containers: false
+    config_redeploy: false  
+  tags: build_runtime_environment
+
+#Deploys a Docker Swarm with Managers/Workers Specified in configuration/inventory.yaml
+- name: Setup Docker Swarm
+  import_playbook: ../roles/setup_docker_swarm/tasks/main.yaml
+  any_errors_fatal: true
+  tags: setup_docker_swarm
+
+#Deploys a Docker Registry Services to the Swarm and Pushes Runtime Container to Registry
+- name: Setup Docker Registry
+  hosts: localhost
+  any_errors_fatal: true
+  connection: local
+  roles:
+    - ansible/roles/setup_docker_registry
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    container_redeploy: false
+  tags: setup_docker_registry
+
+#Deploys Federated Learning Stack to the Swarm
+- name: Deploy Federated Learning Stack
+  hosts: localhost
+  connection: local
+  any_errors_fatal: true
+  roles:
+    - ansible/roles/deploy_fedLearning_stack
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    management_node_count: "1"
+    train_node_count: "{{ groups['workers_train'] | length }}"
+    predict_node_count: "{{ groups['workers_predict'] | length }}"
+  tags: deploy_fedLearn_stack
+  
+#Stops All Running Services and Removes All Nodes from the Swarm 
+- name: Destroy FedLearn Environment
+  import_playbook: ../roles/destroy_swarm_environment/tasks/main.yaml
+  any_errors_fatal: true
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    scale_down: false
+  tags: destroy_swarm_environment

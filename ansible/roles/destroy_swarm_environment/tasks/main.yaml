@@ -1,0 +1,81 @@
+---
+# Have each worker leave the swarm
+- hosts: workers_*
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  tasks:
+    - name: Remove Untagged Docker Images
+      shell: >
+        docker rmi $(docker images --filter "dangling=true" -q --no-trunc)
+      ignore_errors: yes
+      when: not scale_down
+      
+    #Remove each worker
+    - name: Remove Workers from Swarm
+      shell: >
+        docker swarm leave 
+      when: not scale_down       
+
+# Have the manager leave the swarm
+- hosts: manager
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  tasks:
+    #Stop Federated Learning Management Service and Save Model
+    - name: Shutdown Federated Learning Management Service
+      docker_swarm_service:
+        name: Federated_Learning_Manager
+        state: absent
+      when: not scale_down 
+
+   #Remove stack and remaining services
+    - name: Remove stack
+      docker_stack:
+        name: Federated_Learning
+        state: absent
+      when: not scale_down 
+        
+    #Stop Federated Learning Registry Service   
+    - name: Shutdown Federated Learning Registry Service
+      docker_swarm_service:
+        name: FedLearn_Registry
+        state: absent
+      when: not scale_down 
+
+    - name: Remove Untagged Docker Images
+      shell: >
+        docker rmi $(docker images --filter "dangling=true" -q --no-trunc)
+      ignore_errors: yes
+      when: not scale_down 
+   
+   #Leave the swarm
+    - name: Remove Manager from Swarm
+      shell: >
+        docker swarm leave -f
+      when: not scale_down 
+        
+# Scale down workers from the swarm
+- hosts: decommissioned_workers
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  tasks:
+    - name: Remove Untagged Docker Images
+      shell: >
+        docker rmi $(docker images --filter "dangling=true" -q --no-trunc)
+      ignore_errors: yes
+      when: scale_down 
+      
+    #Remove each worker
+    - name: Scale Down Worker from Swarm
+      shell: >
+        docker swarm leave 
+      when: scale_down  
+      
+- hosts: manager
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  tasks:
+    - name: Remove Decommissioned Nodes
+      shell: >
+        docker node rm "{{ hostvars[item]['ansible_hostname'] }}"
+      with_items: "{{ groups['decommissioned_workers'] }}"

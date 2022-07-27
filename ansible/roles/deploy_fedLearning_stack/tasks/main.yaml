@@ -1,0 +1,38 @@
+---
+- name: Get Docker Compose Absolute Path
+  shell: pwd
+  args:
+    chdir: "../../"
+  register: docker_compose_path
+
+#Required for setting and scaling replicas for Train/Predict service
+- name: Count of Nodes
+  debug: "msg='Number of prediciton nodes: {{ predict_node_count }} | Number of Training Nodes: {{ train_node_count }}'"
+
+#Either set or scale services
+- name: Deploy Federated Learning Stack
+  docker_stack:
+    state: present
+    name: Federated_Learning
+    compose:
+      - "{{ docker_compose_path.stdout }}/docker-compose.yaml"
+      - version: '3.8'
+        services:
+          Manager:
+            volumes:
+              - "{{ docker_compose_path.stdout }}/artifacts:/opt/FederatedLearning/artifacts"
+          Train:
+            deploy:
+              replicas: "{{ train_node_count | int }}"  
+          Predict:
+            deploy:
+              replicas: "{{ predict_node_count | int }}"  
+          MQTT_Data_Generator:
+            volumes:
+              - "{{ generator_data_volume }}"
+          Mosquitto_MQTT_Broker:
+            volumes:
+              - "{{ docker_compose_path.stdout }}/configuration/mosquitto:/mosquitto/config/"
+
+    
+           

@@ -1,0 +1,55 @@
+version: "3.8" 
+
+services:
+  Manager:
+    image: localhost:5000/federated_learning:runtime
+    restart: unless-stopped
+    entrypoint: ["python3", "/opt/FederatedLearning/fedLearning.py", "-cp", "/opt/FederatedLearning/configuration/federated_learning/config.yaml", "-ft", "merge_model", "--log_path", "/var/log/"]    
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - "node.role==manager"
+    
+  Train:
+    image: localhost:5000/federated_learning:runtime
+    restart: unless-stopped
+    entrypoint: ["python3", "/opt/FederatedLearning/fedLearning.py", "-cp", "/opt/FederatedLearning/configuration/federated_learning/config.yaml", "-ft", "train", "--log_path", "/var/log/"]      
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - "node.labels.type==train"    
+  Predict:
+    image: localhost:5000/federated_learning:runtime
+    restart: unless-stopped
+    entrypoint: ["python3", "/opt/FederatedLearning/fedLearning.py", "-cp", "/opt/FederatedLearning/configuration/federated_learning/config.yaml", "-ft", "predict", "--log_path", "/var/log/"]    
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - "node.labels.type==predict"
+      
+  MQTT_Data_Generator:
+    image: localhost:5000/federated_learning:runtime
+    restart: unless-stopped
+    entrypoint: ["python3", "/opt/FederatedLearning/data_generator/generate_data.py"]
+    build:
+      context: .
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - "node.role==manager"
+      
+  Mosquitto_MQTT_Broker:
+    image: eclipse-mosquitto:1.6.10
+    restart: unless-stopped
+    ports:
+      - 1883:1883
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - "node.role==manager"
+

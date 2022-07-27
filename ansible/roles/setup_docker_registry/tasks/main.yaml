@@ -1,0 +1,51 @@
+---
+#Deploy registry service that will be used by each swarm node to get latest Federated Learning runtime image
+- name: Deploy Registry Service
+  docker_swarm_service:
+    name: FedLearn_Registry
+    image: registry:2
+    state: present
+    env:
+      "REGISTRY_STORAGE_DELETE_ENABLED": "true"
+    publish:
+      - target_port: 5000
+        published_port: 5000
+    placement:
+      constraints:
+        - "node.role==manager"
+  when: not container_redeploy
+
+#Push new runtime image when the runtime image has been modified  
+- name: Push Re-tagged Federated Learning Image
+  docker_image:
+    name: localhost:5000/federated_learning:old
+    push: true
+    source: local
+  retries: 10
+  delay: 20
+  register: tag_result
+  until: tag_result.failed == false
+  when: container_redeploy
+
+#Set facts for SHA256 image digest 
+- name: Set Fact for Container Digest
+  shell: >
+    curl -v --silent -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' -X GET http://localhost:5000/v2/federated_learning/manifests/runtime 2>&1 | grep Docker-Content-Digest | awk '{print ($3)}'
+  register: Federated_Learning_Digest
+  when: container_redeploy
+ 
+#Remove image tag from registry 
+- name: Remove Digest from Registry
+  shell: >
+    curl -v --silent -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' -X DELETE http://localhost:5000/v2/federated_learning/manifests/{{ Federated_Learning_Digest.stdout_lines }}
+  when: container_redeploy
+   
+- name: Upload Federated Learning Runtime Container to Registry | This could take some time....
+  docker_image:
+    name: localhost:5000/federated_learning:runtime
+    push: true
+    source: local
+  retries: 10
+  delay: 20
+  register: push_result
+  until: push_result.failed == false

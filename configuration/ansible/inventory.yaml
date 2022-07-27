@@ -1,0 +1,40 @@
+# Management node configuration. This should ALWAYS be set to localhost. It is assumed that localhost will always be the Federated Learning manager.
+manager:
+    hosts:
+      localhost
+    vars:
+      # Command used to train baseline model
+      training_command: python3 /opt/FederatedLearning/model_creation/BETH/model_tf2.py -s /opt/FederatedLearning/artifacts/model/model.scaler -m /opt/FederatedLearning/artifacts/model -td /data/training_data -e 1
+    
+      # Command used to create model scaler
+      scaler_command: python3 /opt/FederatedLearning/model_creation/BETH/model_tf2.py -s /opt/FederatedLearning/artifacts/model/model.scaler -sd /data/BETH
+    
+      # Docker volume mount used for model training data. For BETH, this volume coresponds to the -td argument of the model_tf2.py program. The file in the mounted directory should be labelled_training_data.csv
+      training_data_volume: /data:/data
+    
+      # Docker volume mount used for scaler data. For BETH, this volume coresponds to the -sd argument of the model_tf2.py program. 
+      scaler_data_volume: /data:/data
+      
+      #Docker volume mount used by the MQTT Data Generator Service.
+      generator_data_volume: /data:/data
+    
+      #These files will represent the model and scaler files used during Federated Learning. Change these to fit your environment. The BETH example uses the current names
+      files:
+        - model.h5
+        - model.scaler 
+ 
+# All of the Jetson nodes that will partake in training     
+workers_train:
+    hosts:
+#      add hosts for training service here
+
+# All of the Jetson nodes that will partake in prediction     
+workers_predict:
+    hosts:
+#      add hosts for prediction service here
+
+# All of the Jetson nodes to be removed from the Docker Swarm. Only place nodes here if they are currently part of the Swarm and need to be removed
+decommissioned_workers:
+    hosts:
+#      add hosts to decomission here
+

@@ -1,0 +1,1 @@
+docker service ps --no-trunc Federated_Learning_Mosquitto_MQTT_Broker

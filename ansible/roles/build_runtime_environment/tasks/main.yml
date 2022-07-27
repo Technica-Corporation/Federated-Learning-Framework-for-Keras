@@ -1,0 +1,143 @@
+---
+# Gathering facts for runtime environment
+- name: Validate if Base Container Image Exists 
+  docker_image_info:
+    name: federated_learning:base
+  register: base_image_result
+
+- name: Validate if Final Container Image Exists
+  docker_image_info:
+    name: localhost:5000/federated_learning:runtime
+  register: final_image_result
+  
+- name: Validate that Artifacts Directory Exists
+  shell: pwd
+  args:
+    chdir: "../../artifacts"
+  register: artifact_path
+
+- name: Gather Base Model and Scaler Facts
+  stat: path="../../artifacts/model/{{ item }}"
+  with_items: "{{ files }}"
+  register: check_files
+  when: final_image_result.images | length == 0 or rebuild_model
+  
+- name: Set New Federated Learning Tag Facts
+  docker_image:
+    name: localhost:5000/federated_learning:runtime
+    repository: localhost:5000/federated_learning:old
+    state: present
+    source: local
+  when: rebuild_containers or config_redeploy
+
+# Build base container. This will be used for creating the model and scaler if they are not present or are being rebuilt
+- name: Build Base Container Image | This could take some time...
+  docker_image:
+    name: federated_learning:base
+    build:
+      path: ../../
+      target: base
+    state: present
+    source: build
+    force_source: yes
+  when: (base_image_result.images | length == 0 and final_image_result.images | length == 0) or (rebuild_containers)
+
+- name: Start Container to Create Model Scaler
+  docker_container:
+    name: Federated_Learning_Scaler_Creation
+    image: federated_learning:base
+    state: started
+    command: "{{ scaler_command }}"
+    runtime: nvidia
+    volumes:
+      - "{{ artifact_path.stdout }}:/opt/FederatedLearning/artifacts"
+      - "{{ scaler_data_volume }}"
+  when: (final_image_result.images | length == 0 and check_files.results[1].stat.exists == False) or rebuild_model
+   
+- name: Wait for Model Scaler to be Created | This could take some time...
+  docker_container_info:
+    name: Federated_Learning_Scaler_Creation
+  register: docker_result
+  retries: 100
+  delay: 20
+  until: docker_result.container['State']['Status'] == "exited"
+  failed_when:
+    - docker_result.container['State']['Status'] == "started"
+  when: (final_image_result.images | length == 0 and check_files.results[1].stat.exists == False) or rebuild_model 
+  
+- name: Start Container to Create Base Model
+  docker_container:
+    name: Federated_Learning_Model_Creation
+    image: federated_learning:base
+    state: started
+    command: "{{ training_command }}"
+    runtime: nvidia
+    volumes:
+      - "{{ artifact_path.stdout }}:/opt/FederatedLearning/artifacts"
+      - "{{ training_data_volume }}"
+  when: (final_image_result.images | length == 0 and check_files.results[0].stat.exists == False) or rebuild_model
+     
+- name: Wait for Model to be Created | This could take some time...
+  docker_container_info:
+    name: Federated_Learning_Model_Creation
+  register: docker_result
+  retries: 100
+  delay: 20
+  until: docker_result.container['State']['Status'] == "exited"
+  failed_when:
+    - docker_result.container['State']['Status'] == "started"
+  when: (final_image_result.images | length == 0 and check_files.results[0].stat.exists == False) or rebuild_model 
+
+#Cleanup containers used to make model/scaler
+- name: Remove Container used to Create Model Scaler
+  docker_container:
+    name: Federated_Learning_Scaler_Creation
+    state: absent
+  when: final_image_result.images | length == 0 or rebuild_model
+
+- name: Remove Container used to Create Base Model
+  docker_container:
+    name: Federated_Learning_Model_Creation
+    state: absent
+  when: final_image_result.images | length == 0 or rebuild_model
+ 
+#Set facts to ensure that model and scaler exist 
+- name: Validate Base Model and Scaler Facts
+  stat: path="../../artifacts/model/{{ item }}"
+  with_items: "{{ files }}"
+  register: validate_files
+
+- name: Validate that Base Model Exists
+  debug: msg="Base Model Exists... Moving to Scaler"
+  failed_when:
+    - validate_files.results[0].stat.exists == False
+  when: final_image_result.images | length == 0 or rebuild_model
+  
+- name: Validate that Scaler Exists
+  debug: msg="Scaler Exists... Moving to Build Final Container Image"
+  failed_when:
+    - validate_files.results[1].stat.exists == False
+  when: final_image_result.images | length == 0 or rebuild_model
+
+# Build final runtime image as is or rebuild with new configuration       
+- name: Build Final Container Image | This one won't take as long.
+  docker_image:
+    name: localhost:5000/federated_learning:runtime
+    build:
+      path: ../../
+      target: final_build
+    state: present
+    source: build
+    force_source: yes
+  when: final_image_result.images | length == 0 or rebuild_containers
+  
+- name: Rebuild Final Container Image with New Configuration | This one won't take as long.
+  docker_image:
+    name: localhost:5000/federated_learning:runtime
+    build:
+      path: ../../
+      target: config_redeploy
+    state: present
+    force_source: yes
+    source: build
+  when: config_redeploy

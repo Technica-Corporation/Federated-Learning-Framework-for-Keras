@@ -1,0 +1,131 @@
+---
+# determine the status of each manager node and break them into two groups:
+#   - swarm_manager_operational (swarm is running and active)
+#   - swarm_manager_bootstrap (host needs to be joined to the cluster)
+- hosts: manager
+  tasks:
+    - name: Validate Swarm Status
+      shell: >
+        docker info --format \{\{.Swarm.LocalNodeState\}\}
+      register: swarm_status
+
+    - name: Create swarm_manager_operational Group
+      add_host:
+        hostname: "{{ item }}"
+        groups: swarm_manager_operational
+      with_items: "{{ ansible_play_hosts | default(play_hosts) }}"
+      when: "'active' in hostvars[item].swarm_status.stdout_lines"
+      run_once: true
+
+    - name: Create swarm_manager_bootstrap Group
+      add_host:
+        hostname: "{{ item }}"
+        groups: swarm_manager_bootstrap
+      with_items: "{{ ansible_play_hosts | default(play_hosts) }}"
+      when: "'active' not in hostvars[item].swarm_status.stdout_lines"
+      run_once: true
+
+# Init Swarm Manager when the swarm_manager_operational group is empty
+- hosts: swarm_manager_bootstrap[0]
+  tasks:
+    - name: initialize swarm cluster
+      shell: >
+        docker swarm init
+        --advertise-addr={{ swarm_iface | default('eth0') }}:2377
+      when: "'swarm_manager_operational' not in groups"
+      register: bootstrap_first_node
+
+    - name: add initialized host to swarm_manager_operational group
+      add_host:
+        hostname: "{{ item }}"
+        groups: swarm_manager_operational
+      with_items: "{{ ansible_play_hosts | default(play_hosts) }}"
+      
+# Retrieve the swarm tokens and populate a list of ips listening on the swarm port 2377
+- hosts: swarm_manager_operational[0]
+  vars:
+    iface: "{{ swarm_iface | default('eth0') }}"
+  tasks:
+    - name: retrieve swarm manager token
+      shell: docker swarm join-token -q manager
+      register: swarm_manager_token
+
+    - name: retrieve swarm worker token
+      shell: docker swarm join-token -q worker
+      register: swarm_worker_token
+
+    - name: populate list of manager ips
+      add_host:
+        hostname: "{{ hostvars[item]['ansible_' + iface]['ipv4']['address'] }}"
+        groups: swarm_manager_ips
+      with_items: "{{ ansible_play_hosts | default(play_hosts) }}"
+
+# Join the manager hosts not yet initialized to the swarm cluster
+- hosts: swarm_manager_bootstrap:!swarm_manager_operational
+  vars:
+    token: "{{ hostvars[groups['swarm_manager_operational'][0]]['swarm_manager_token']['stdout'] }}"
+  tasks:
+    - name: join manager nodes to cluster
+      shell: >
+        docker swarm join
+        --advertise-addr={{ swarm_iface | default('eth0') }}:2377
+        --token={{ token }}
+        {{ groups['swarm_manager_ips'][0] }}:2377
+        
+# Determine the status of each worker node and break them into two groups:
+#   - swarm_worker_operational (host is joined to the swarm cluster)
+#   - swarm_worker_bootstrap (host needs to be joined to the cluster)
+- hosts: workers_*
+  tasks:
+    - name: determine swarm status
+      shell: >
+        docker info --format \{\{.Swarm.LocalNodeState\}\}
+      register: swarm_status
+
+    - name: create swarm_worker_operational group
+      add_host:
+        hostname: "{{ item }}"
+        groups: swarm_worker_operational
+      with_items: "{{ ansible_play_hosts | default(play_hosts) }}"
+      when: "'active' in hostvars[item].swarm_status.stdout_lines"
+      run_once: true
+
+    - name: create swarm_worker_bootstrap group
+      add_host:
+        hostname: "{{ item }}"
+        groups: swarm_worker_bootstrap
+      with_items: "{{ ansible_play_hosts | default(play_hosts) }}"
+      when: "'active' not in hostvars[item].swarm_status.stdout_lines"
+      run_once: true
+
+# Join the worker hosts not yet initialized to the swarm cluster
+- hosts: swarm_worker_bootstrap
+  vars:
+    token: "{{ hostvars[groups['swarm_manager_operational'][0]]['swarm_worker_token']['stdout'] }}"
+  tasks:
+    - name: join worker nodes to cluster
+      shell: >
+        docker swarm join
+        --advertise-addr={{ swarm_iface | default('eth0') }}:2377
+        --token={{ token }}
+        {{ groups['swarm_manager_ips'][0] }}:2377
+
+# Label all added nodes such that the correct services run on them
+- hosts: manager
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  tasks:
+    - name: Label Prediction Nodes
+      docker_node:
+        hostname: "{{ hostvars[item]['ansible_hostname'] }}"
+        labels:
+          type: predict
+      with_items: "{{ groups['workers_predict'] }}"
+
+    - name: Label Training Nodes
+      docker_node:
+        hostname: "{{ hostvars[item]['ansible_hostname'] }}"
+        labels:
+          type: train
+      with_items: "{{ groups['workers_train'] }}"
+

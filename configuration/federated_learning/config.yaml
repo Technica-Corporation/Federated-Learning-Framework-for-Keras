@@ -1,0 +1,132 @@
+# MQTT Host Configuration. TLS support is enabled and configurable 
+#### host: MQTT host to connect to. This can be a DNS or IP address. The default value is Federated_Learning_Mosquitto_MQTT_Broker which is the DNS address of the MQTT docker container.
+#### port: MQTT host connection port
+#### keepalive: MQTT keepalive
+#### sub_qos: MQTT subscription quality of service
+#### pub_qos: MQTT publish quality of service
+#### mqtt_protocol: MQTT protocol used during MQTT connection
+#### ssl_protocol: SSL/TLS protocol used to connect to MQTT broker
+#### ssl_cert_path: Path to SSL cert used to establish TLS connection to MQTT broker
+
+mqtt_connection:
+  host: Federated_Learning_Mosquitto_MQTT_Broker
+  port: 1883
+  keepalive: 60
+  sub_qos: 2
+  pub_qos: 0
+  mqtt_protocol: 311
+  ssl_protocol: None
+#  ssl_cert_path: /opt/FederatedLearning/ex_config_yaml/predict/cert.crt
+
+# Data Generator Configuration. For demo purposes, a data generator is used to publish data to MQTT topics so that the predict/train nodes can have data to work with
+#### pub_topic: Topic the generator will publish data to, following the grouped configuration options
+#### total_runtime: Time in seconds to generate data to this node; set to 0 to run forever
+#### publish_interval: Time in seconds between publishes to this node; can be decimal valuesl like .25
+#### start_normal: Start data as normal; set to False to start with anomalous
+#### cycle_anomaly: Cycle between normal and anomalous data
+#### n_time: Time in seconds the 'normal' cycle will last; only required if cycle_anomaly: True
+#### a_time: Time in seconds the 'anomalous' cycle will last; only required if cycle_anomaly: True
+#### dataset_path: Path to the dataset file to pull data from
+#### features: The feature columns that will be published via MQTT. There can be n many features for this
+#### dataset_label: The column used to label between normal an anomalous data
+
+data_generator:
+  pub_topic: "fedLearn/train_data"                            
+  total_runtime: 0                                            
+  publish_interval: 1                                         
+  start_normal: True                                         
+  cycle_anomaly: True                                         
+  n_time: 10                                                   
+  a_time: 10000                                                  
+  dataset_path: "/data/BETH/labelled_training_data.csv"        
+  features:                                                    
+    - processId
+    - parentProcessId
+    - userId
+    - mountNamespace
+    - eventId
+    - argsNum
+    - returnValue
+  dataset_label: sus                            
+  
+# Publish and subscribe topics for the prediction nodes. Either can be a single topic or a list of topics.  
+#### sub_topics: List of topics for the Prediction service to subscribe to. NOTE: This list must include the nn_config model_update_topic.
+#### pub_topic: Topic to publish anomaly score to
+#### cache_size: Size of message cache to set before starting prediciton
+
+predict_mqtt_topics:                                         
+  sub_topics: [fedLearn/train_data, model/production/update]
+  pub_topic: fedLearn/prediction/output
+  cache_size: 1                                             # Number of messages to receive before performing predictions or training
+
+# Publish and subscribe topics for the training nodes. Either can be a single topic or a list of topics. 
+#### sub_topics: List of topics for the Training service to subscribe to. NOTE: This list must include the nn_config model_update_topic.
+#### pub_topic: Topic to publish trained model weights to
+#### cache_size:  Size of message cache to set before starting model training
+  
+training_mqtt_topics:                                        
+  sub_topics: [fedLearn/train_data, model/production/update]
+  pub_topic: model/train/update
+  cache_size: 10                                             # Number of messages to receive before performing predictions or training
+  
+# Publish and subscribe topics for the manager nodes. Either can be a single topic or a list of topics.  
+#### sub_topics: List of topics for the Manager service to subscribe to. The sub topic should be the pub topic for the Training service
+#### pub_topic: Topic to publish merged model weights to
+  
+manager_mqtt_topics:                                        
+  sub_topics: [model/train/update]
+  pub_topic: model/production/update
+
+# Configuration parameters for the neural network model used for prediciton, training, or model merging 
+#### model_path: Path to the model used by the prediction and training services
+#### scaler_path: Path to the scaler used by the prediction and training services
+#### model_update_topic: Topic to set model update callback for the prediction and training services
+
+nn_config:                                                   
+  model_path: /opt/FederatedLearning/artifacts/model/model.h5
+  scaler_path: /opt/FederatedLearning/artifacts/model/model.scaler
+  model_update_topic: model/production/update
+
+# Configuration parameters for the Federated Learning Manager. Dictates how the model is merged and distrubuted to the nodes in the cluster
+#### num_rounds: Number of rounds to merge model before publishing weights to the prod_pub_topic
+#### prod_pub_topic: The MQTT topic to publish updated model weights after a set number of merge rounds
+#### model_cache_size: The number of merged model weights to keep in cache
+#### merge_ratio: The ratio used to merge models
+#### precision: The compression rate to set for the model weights before sending via MQTT. This value must be <= 32
+
+merge_model:                                                
+  num_rounds: 10
+  prod_pub_topic: model/global/update
+  model_cache_size: 2
+  merge_ratio: 1.0
+  precision: 32
+  
+# Configuration parameters for the Federated Learning training. Dictates how the model is trained 
+#### train_epochs: Number of training epochs 
+#### train_bs: Training Batch Size
+#### precision: The compression rate to set for the model weights before sending via MQTT. This value must be <= 32
+#### early_stopping: Keras Callback for Early Stopping during Training
+#### es_patience: number of epochs with no improvement after which learning rate will be reduced.
+#### es_delta: threshold for measuring the new optimum, to only focus on significant changes.
+#### reduce_lr_on_plateau: Keras Callback for reducing the training learning rate when a loss plateau is hit
+#### lr_patience: number of epochs with no improvement after which learning rate will be reduced.
+#### lr_delta: threshold for measuring the new optimum, to only focus on significant changes.
+#### lr_cooldown: Number of epochs to wait before resuming normal operations after lr has been reduced
+#### min_lr: minimum learning rate
+
+train:                                                     
+  train_epochs: 10                                         
+  train_bs: 32   
+  precision: 32                                         
+  early_stopping: false                                   
+  es_patience: 2
+  es_delta: 0.01                                            
+  reduce_lr_on_plateau: false
+  lr_patience: 2
+  lr_delta: 0.01
+  lr_cooldown: 4                                           
+  min_lr: 0.00001                                                 
+  
+#### Topic to publish Federated Learning Status for the Federated Learning Manager
+status_update_pub_topic: server/status
+
